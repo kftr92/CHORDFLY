@@ -7,8 +7,6 @@ import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.http.SslError
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -27,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -106,10 +103,6 @@ fun YouTubeWebPlayer(
     val activity = remember(context) { context.findActivity() }
     var isFullscreen by remember { mutableStateOf(false) }
 
-    val currentOnTimeUpdate by rememberUpdatedState(onTimeUpdate)
-    val currentOnStateChange by rememberUpdatedState(onStateChange)
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-
     val chromeClient = remember(activity) {
         FullscreenWebChromeClient(activity) { inFullscreen ->
             isFullscreen = inFullscreen
@@ -123,85 +116,6 @@ fun YouTubeWebPlayer(
     val videoId = remember(targetUrl) { extractYouTubeId(targetUrl) }
     val embedUrl = remember(videoId) {
         "https://www.youtube.com/embed/$videoId?playsinline=1&controls=1&rel=0&enablejsapi=1&origin=$ORIGIN_PARAM"
-    }
-
-    class AndroidJsBridge {
-        private var lastLoggedTime = -1f
-
-        @JavascriptInterface
-        fun onTimeUpdate(seconds: Float) {
-            if (!seconds.isFinite() || seconds < 0f) return
-            if (Math.abs(seconds - lastLoggedTime) >= 1.0f) {
-                lastLoggedTime = seconds
-                Log.d(TAG, "PLAYER_TIME=%.1f".format(seconds))
-            }
-            mainHandler.post {
-                currentOnTimeUpdate(seconds)
-            }
-        }
-
-        @JavascriptInterface
-        fun onStateChange(playing: Boolean, stateName: String?) {
-            val name = stateName ?: if (playing) "PLAYING" else "PAUSED"
-            Log.d(TAG, "PLAYER_STATE=$name")
-            mainHandler.post {
-                currentOnStateChange(playing)
-            }
-        }
-
-        @JavascriptInterface
-        fun log(message: String) {
-            Log.d(TAG, message)
-        }
-    }
-
-    fun injectSyncScript(webView: WebView) {
-        val js = """
-            (function() {
-                if (window.__chordflyTimeSync) return;
-                window.__chordflyTimeSync = true;
-
-                var lastTime = -1;
-                var lastState = null;
-
-                function update() {
-                    try {
-                        var video = document.querySelector('video');
-                        if (!video) return;
-
-                        var time = Number(video.currentTime);
-                        if (!isFinite(time) || time < 0) return;
-
-                        if (Math.abs(time - lastTime) >= 0.05) {
-                            lastTime = time;
-                            if (window.AndroidBridge) {
-                                window.AndroidBridge.onTimeUpdate(time);
-                            }
-                        }
-
-                        var state;
-                        if (video.ended) {
-                            state = "ENDED";
-                        } else if (video.paused) {
-                            state = "PAUSED";
-                        } else {
-                            state = "PLAYING";
-                        }
-
-                        if (state !== lastState) {
-                            lastState = state;
-                            if (window.AndroidBridge) {
-                                window.AndroidBridge.onStateChange(state === "PLAYING", state);
-                            }
-                        }
-                    } catch(e) {}
-                }
-
-                window.__chordflySyncTimer = setInterval(update, 150);
-            })();
-        """.trimIndent()
-
-        webView.evaluateJavascript(js, null)
     }
 
     AndroidView(
@@ -225,22 +139,57 @@ fun YouTubeWebPlayer(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         Log.d(TAG, "PAGE_FINISHED=$url")
-                        view?.let { webView ->
-                            Log.d(TAG, "WEBVIEW_SIZE=${webView.width}x${webView.height}")
-                            Log.d(TAG, "WEBVIEW_VISIBLE=${webView.visibility == View.VISIBLE}")
-                            Log.d(TAG, "WEBVIEW_ALPHA=${webView.alpha}")
-                            Log.d(TAG, "WEBVIEW_SCALE=${webView.scaleX}")
+                        view?.let {
+                            Log.d(TAG, "WEBVIEW_SIZE=${it.width}x${it.height}")
+                            Log.d(TAG, "WEBVIEW_VISIBLE=${it.visibility == View.VISIBLE}")
+                            Log.d(TAG, "WEBVIEW_ALPHA=${it.alpha}")
+                            Log.d(TAG, "WEBVIEW_SCALE=${it.scaleX}")
 
-                            injectSyncScript(webView)
+                            val injectScript = """
+                                (function() {
+                                    if (window.__chordflyTracker) return;
+                                    window.__chordflyTracker = true;
+                                    function initTracker() {
+                                        var v = document.querySelector('video');
+                                        if (!v) {
+                                            setTimeout(initTracker, 300);
+                                            return;
+                                        }
+                                        var lastT = -1;
+                                        function sendT() {
+                                            if (v) {
+                                                var t = v.currentTime;
+                                                if (typeof t === 'number' && Math.abs(t - lastT) > 0.05) {
+                                                    lastT = t;
+                                                    if (window.AndroidBridge && typeof window.AndroidBridge.onTimeUpdate === 'function') {
+                                                        window.AndroidBridge.onTimeUpdate(t);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        v.addEventListener('timeupdate', sendT);
+                                        v.addEventListener('play', function() {
+                                            if (window.AndroidBridge && typeof window.AndroidBridge.onStateChange === 'function') {
+                                                window.AndroidBridge.onStateChange(true);
+                                            }
+                                        });
+                                        v.addEventListener('pause', function() {
+                                            if (window.AndroidBridge && typeof window.AndroidBridge.onStateChange === 'function') {
+                                                window.AndroidBridge.onStateChange(false);
+                                            }
+                                        });
+                                        setInterval(sendT, 250);
+                                    }
+                                    initTracker();
+                                })();
+                            """.trimIndent()
+                            it.evaluateJavascript(injectScript, null)
                         }
                     }
 
                     override fun onPageCommitVisible(view: WebView?, url: String?) {
                         super.onPageCommitVisible(view, url)
                         Log.d(TAG, "PAGE_COMMIT_VISIBLE=$url")
-                        view?.let { webView ->
-                            injectSyncScript(webView)
-                        }
                     }
 
                     override fun onReceivedError(
@@ -309,7 +258,22 @@ fun YouTubeWebPlayer(
                     allowFileAccess = true
                 }
 
-                addJavascriptInterface(AndroidJsBridge(), "AndroidBridge")
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun onTimeUpdate(sec: Float) {
+                        onTimeUpdate(sec)
+                    }
+
+                    @JavascriptInterface
+                    fun onStateChange(playing: Boolean) {
+                        onStateChange(playing)
+                    }
+
+                    @JavascriptInterface
+                    fun logMessage(msg: String) {
+                        Log.d(TAG, msg)
+                    }
+                }, "AndroidBridge")
 
                 tag = videoId
                 Log.d(TAG, "VIDEO_ID=$videoId")
@@ -323,7 +287,6 @@ fun YouTubeWebPlayer(
         update = { webView ->
             if (webView.tag != videoId) {
                 webView.tag = videoId
-                webView.evaluateJavascript("if (window.__chordflySyncTimer) clearInterval(window.__chordflySyncTimer); window.__chordflyTimeSync = false;", null)
                 webView.setBackgroundColor(Color.BLACK)
                 Log.d(TAG, "VIDEO_ID=$videoId")
                 Log.d(TAG, "EMBED_URL=$embedUrl")
@@ -334,7 +297,6 @@ fun YouTubeWebPlayer(
             }
         },
         onRelease = { webView ->
-            webView.evaluateJavascript("if (window.__chordflySyncTimer) clearInterval(window.__chordflySyncTimer);", null)
             webView.stopLoading()
             webView.destroy()
         },
@@ -347,6 +309,7 @@ fun extractYouTubeId(input: String): String {
     return when {
         clean.contains("v=") -> clean.substringAfter("v=").substringBefore("&")
         clean.contains("youtu.be/") -> clean.substringAfter("youtu.be/").substringBefore("?")
+        clean.contains("embed/") -> clean.substringAfter("embed/").substringBefore("?")
         clean.length == 11 && !clean.contains(" ") -> clean
         else -> clean
     }

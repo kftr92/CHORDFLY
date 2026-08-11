@@ -73,14 +73,6 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            viewModel.toggleMicListening()
-        }
-    }
-
     // Collect UI events (Toasts)
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
@@ -124,7 +116,7 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
             onAiAnalyzeClick = { viewModel.runGeminiChordAnalysis() }
         )
 
-        // CHORDFLY V2 SEARCH & PLAYBACK CONTROL PANEL
+        // CHORDFLY V2 SEARCH CONTROL PANEL
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -133,7 +125,6 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
             shape = RoundedCornerShape(12.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                // Section 1: Search Song Name
                 Text(
                     text = "Cari lagu",
                     color = Color.LightGray,
@@ -177,84 +168,6 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
                     Text("🔎 CARI DI YOUTUBE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    color = Color(0xFF222B38)
-                )
-
-                // Section 2: Paste YouTube URL
-                Text(
-                    text = "Atau tempel URL video:",
-                    color = Color.LightGray,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                OutlinedTextField(
-                    value = youtubeState.youtubeUrl,
-                    onValueChange = { viewModel.onYoutubeUrlChange(it) },
-                    placeholder = { Text("https://youtube.com/watch?v=...", color = Color.Gray, fontSize = 13.sp) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF00FF88),
-                        unfocusedBorderColor = Color(0xFF232832),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Paste Button
-                    OutlinedButton(
-                        onClick = {
-                            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clipData = clipboardManager.primaryClip
-                            val clipText = if (clipData != null && clipData.itemCount > 0) {
-                                clipData.getItemAt(0).text?.toString()
-                            } else {
-                                null
-                            }
-                            viewModel.pasteFromClipboard(clipText)
-                        },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00FF88)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "Tempel Clipboard",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("📋 TEMPEL", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    // Open Video Button
-                    Button(
-                        onClick = { viewModel.openVideoFromUrl() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Buka Video",
-                            tint = Color.Black,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("▶ BUKA VIDEO", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
-                }
-
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Status Bar
@@ -290,20 +203,7 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
             currentChord = uiState.currentChord,
             transposeOffset = uiState.transposeOffset,
             currentTimeSec = uiState.currentTimeSec,
-            notes = uiState.currentChordNotes,
-            livePitch = uiState.livePitch,
-            isMicListening = uiState.isMicListening,
-            onMicToggleClick = {
-                val hasPermission = ContextCompat.checkSelfPermission(
-                    context, Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
-
-                if (hasPermission) {
-                    viewModel.toggleMicListening()
-                } else {
-                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            }
+            notes = uiState.currentChordNotes
         )
 
         // Upcoming Chords Preview Row
@@ -328,7 +228,7 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
             transposeOffset = uiState.transposeOffset,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp)
+                .height(280.dp)
         )
     }
 }

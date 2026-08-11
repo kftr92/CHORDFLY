@@ -25,26 +25,33 @@ class GeminiChordAnalyzer {
             }
 
             val prompt = """
-                You are a professional music chord analyst for CHORDFLY V2.
-                Analyze the song '$sanitizedQuery' and its observed progression: [$observationsSummary].
-                Generate an accurate 12 to 16 chord progression with timestamps in seconds.
+                You are a master musicologist and precise song chord transcriber for CHORDFLY V2.
+                Analyze the song '$sanitizedQuery' by its official artist.
+
+                Tasks:
+                1. Determine the EXACT Key, BPM, and Intro Delay (seconds before music starts).
+                2. Calculate barDuration = (60.0 / BPM) * 4.0 seconds (for standard 4/4 time signature).
+                3. Transcribe the COMPLETE full-length song chord progression bar-by-bar covering Intro, Verse 1, Pre-Chorus, Chorus, Verse 2, Chorus, Bridge, Chorus, and Outro (provide 40 to 64 bars).
+                4. Set each bar's 'timeSec' PRECISELY based on BPM: bar 0 timeSec = introDelay, bar 1 timeSec = introDelay + barDuration, bar 2 timeSec = introDelay + (2 * barDuration), etc.
+                5. Provide the EXACT real chord progression for '$sanitizedQuery' (use exact chord names like "C", "G", "Am", "F", "Em", "Dm", "D7", "Cmaj7", "A7", "C/E", "G/B").
 
                 Rules:
-                1. Return ONLY valid JSON (no markdown formatting, no explanation).
-                2. Use keys: "title", "artist", "key", "bpm", "chords".
-                3. "chords" is an array of objects with keys: "timeSec" (float), "chord" (string e.g. "C", "G", "Am", "F", "Em", "D7", "C/E"), "confidence" (float 0.0 to 1.0).
+                - Return ONLY valid JSON without markdown formatting.
+                - Keys required: "title", "artist", "key", "bpm", "introDelaySec", "chords".
+                - "chords" is an array of objects for EVERY BAR with keys: "barIndex" (int), "timeSec" (float), "chord" (string), "confidence" (float).
 
-                Target JSON Format:
+                JSON Format:
                 {
                   "title": "$sanitizedQuery",
-                  "artist": "Artist",
+                  "artist": "Official Artist",
                   "key": "C",
                   "bpm": 120,
+                  "introDelaySec": 1.0,
                   "chords": [
-                    {"timeSec": 0.0, "chord": "C", "confidence": 0.95},
-                    {"timeSec": 3.0, "chord": "G", "confidence": 0.92},
-                    {"timeSec": 6.0, "chord": "Am", "confidence": 0.90},
-                    {"timeSec": 9.0, "chord": "F", "confidence": 0.94}
+                    {"barIndex": 0, "timeSec": 1.0, "chord": "C", "confidence": 0.95},
+                    {"barIndex": 1, "timeSec": 3.0, "chord": "G", "confidence": 0.92},
+                    {"barIndex": 2, "timeSec": 5.0, "chord": "Am", "confidence": 0.90},
+                    {"barIndex": 3, "timeSec": 7.0, "chord": "F", "confidence": 0.94}
                   ]
                 }
             """.trimIndent()
@@ -84,14 +91,22 @@ class GeminiChordAnalyzer {
             val title = jsonObject.optString("title", defaultTitle)
             val artist = jsonObject.optString("artist", "Featured Artist")
             val key = jsonObject.optString("key", "C")
-            val bpm = jsonObject.optInt("bpm", 120)
+            var bpm = jsonObject.optInt("bpm", 120)
+            if (bpm < 40 || bpm > 240) bpm = 120
+            val barDuration = (60.0f / bpm) * 4.0f
+            val introDelay = jsonObject.optDouble("introDelaySec", 0.0).toFloat().coerceAtLeast(0f)
 
             val chordsArray = jsonObject.optJSONArray("chords") ?: JSONArray()
             val chordsList = mutableListOf<ChordTimestamp>()
 
+            var lastTime = -1.0f
             for (i in 0 until chordsArray.length()) {
                 val item = chordsArray.getJSONObject(i)
-                val time = item.optDouble("timeSec", i * 3.0).toFloat()
+                var time = item.optDouble("timeSec", -1.0).toFloat()
+                if (time < 0f || time <= lastTime) {
+                    time = introDelay + (i * barDuration)
+                }
+                lastTime = time
                 val chordStr = item.optString("chord", "C")
                 val conf = item.optDouble("confidence", 0.90).toFloat()
                 chordsList.add(
@@ -120,20 +135,24 @@ class GeminiChordAnalyzer {
 
     private fun generateSmartFallback(query: String): GeminiChordResult {
         val progressions = listOf(
-            listOf("C", "G", "Am", "F", "C", "G", "Am", "F", "C", "Em", "F", "G"),
-            listOf("G", "D", "Em", "C", "G", "D", "Em", "C", "D", "Em", "C", "D"),
-            listOf("Am", "F", "C", "G", "Am", "F", "C", "G", "Dm", "Am", "F", "G"),
-            listOf("D", "A", "Bm", "G", "D", "A", "Bm", "G", "Em", "F#m", "G", "A")
+            listOf("C", "G", "Am", "F", "C", "G", "Am", "F", "C", "Em", "F", "G", "Am", "Em", "F", "G"),
+            listOf("G", "D", "Em", "C", "G", "D", "Em", "C", "D", "Em", "C", "D", "G", "D", "Em", "C"),
+            listOf("Am", "F", "C", "G", "Am", "F", "C", "G", "Dm", "Am", "F", "G", "Am", "F", "C", "G"),
+            listOf("D", "A", "Bm", "G", "D", "A", "Bm", "G", "Em", "F#m", "G", "A", "D", "A", "Bm", "G")
         )
         val hash = Math.abs(query.hashCode()) % progressions.size
-        val selected = progressions[hash]
+        val selectedPattern = progressions[hash]
 
-        val fallbackChords = selected.mapIndexed { index, chordStr ->
+        val bpm = 120
+        val barDuration = (60.0f / bpm) * 4.0f // 2.0s per bar at 120 BPM
+        // Build 64 bars covering 128 seconds
+        val fallbackChords = List(64) { index ->
+            val chordStr = selectedPattern[index % selectedPattern.size]
             ChordTimestamp(
                 id = index,
-                timeSec = index * 3.0f,
+                timeSec = index * barDuration,
                 chord = chordStr,
-                confidence = 0.88f,
+                confidence = 0.90f,
                 source = "Smart Music Engine"
             )
         }
@@ -141,10 +160,10 @@ class GeminiChordAnalyzer {
         return GeminiChordResult(
             songTitle = query,
             artist = "Acoustic Band",
-            key = selected[0],
-            bpm = 118,
+            key = selectedPattern[0],
+            bpm = bpm,
             chords = fallbackChords,
-            summary = "Mapped chord structure for '$query'."
+            summary = "Mapped full-length 64-bar chord structure for '$query'."
         )
     }
 }

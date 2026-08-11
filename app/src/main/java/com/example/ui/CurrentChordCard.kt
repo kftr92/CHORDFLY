@@ -1,12 +1,8 @@
 package com.example.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -18,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.ChordTimestamp
-import com.example.model.DetectedPitch
 import com.example.music.ChordTransposer
 
 @Composable
@@ -27,9 +22,6 @@ fun CurrentChordCard(
     transposeOffset: Int,
     currentTimeSec: Float,
     notes: List<String>,
-    livePitch: DetectedPitch,
-    isMicListening: Boolean,
-    onMicToggleClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val transposedChordName = currentChord?.let {
@@ -116,34 +108,6 @@ fun CurrentChordCard(
                     color = Color(0xFF00FF88),
                     trackColor = Color(0xFF2A313C)
                 )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Mic DSP Observation Chip
-            Surface(
-                color = if (isMicListening) Color(0xFF331616) else Color(0xFF222832),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.clickable { onMicToggleClick() }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = if (isMicListening) Icons.Default.Mic else Icons.Default.MicOff,
-                        contentDescription = "Microphone Observation",
-                        tint = if (isMicListening) Color.Red else Color.Gray,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isMicListening) "DSP: ${livePitch.chordName}" else "Mic Off",
-                        color = if (isMicListening) Color.White else Color.Gray,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
             }
         }
     }

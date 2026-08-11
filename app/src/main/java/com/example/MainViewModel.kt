@@ -34,20 +34,19 @@ class MainViewModel : ViewModel() {
     private val audioEngine = AudioChordEngine()
     private val geminiAnalyzer = GeminiChordAnalyzer()
 
-    private val defaultChords = listOf(
-        ChordTimestamp(0, 0.0f, "C", 0.95f),
-        ChordTimestamp(1, 3.0f, "G", 0.92f),
-        ChordTimestamp(2, 6.0f, "Am", 0.90f),
-        ChordTimestamp(3, 9.0f, "F", 0.94f),
-        ChordTimestamp(4, 12.0f, "C", 0.95f),
-        ChordTimestamp(5, 15.0f, "Em", 0.88f),
-        ChordTimestamp(6, 18.0f, "Am", 0.91f),
-        ChordTimestamp(7, 21.0f, "F", 0.93f),
-        ChordTimestamp(8, 24.0f, "Dm", 0.87f),
-        ChordTimestamp(9, 27.0f, "G7", 0.89f),
-        ChordTimestamp(10, 30.0f, "Cmaj7", 0.96f),
-        ChordTimestamp(11, 33.0f, "C", 0.95f)
-    )
+    private val defaultChords = run {
+        val pattern = listOf("C", "G", "Am", "F", "C", "Em", "F", "G", "Am", "Em", "F", "C", "Dm", "G", "C", "C")
+        List(64) { index ->
+            val chordName = pattern[index % pattern.size]
+            ChordTimestamp(
+                id = index,
+                timeSec = index * 2.0f,
+                chord = chordName,
+                confidence = 0.95f,
+                source = "Standard Preset"
+            )
+        }
+    }
 
     private val _uiState = MutableStateFlow(
         ChordFlyUiState(
