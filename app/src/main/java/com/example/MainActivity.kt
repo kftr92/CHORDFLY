@@ -2,7 +2,6 @@ package com.example
 
 import android.annotation.SuppressLint
 import android.os.Bundle
-import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -75,10 +74,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun ChordifyAppScreen() {
-    // State query bisa berupa Video ID atau Kata Kunci Pencarian
-    var searchQueryOrId by remember { mutableStateOf("jfKfPfyJRdk") }
-    var isSearchQuery by remember { mutableStateOf(false) }
     var searchInput by remember { mutableStateOf("") }
+    var activeTargetUrl by remember { mutableStateOf("https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=1&controls=1&modestbranding=1&rel=0") }
     var currentTimeSec by remember { mutableFloatStateOf(0f) }
     var transposeOffset by remember { mutableIntStateOf(0) }
 
@@ -124,7 +121,7 @@ fun ChordifyAppScreen() {
             OutlinedTextField(
                 value = searchInput,
                 onValueChange = { searchInput = it },
-                placeholder = { Text("Ketik Judul Lagu / Paste Link YouTube...", color = Color.Gray) },
+                placeholder = { Text("Ketik Judul Lagu / Paste Link...", color = Color.Gray) },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFF00FF88),
@@ -137,16 +134,16 @@ fun ChordifyAppScreen() {
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = {
-                    if (searchInput.isNotBlank()) {
-                        val extractedId = extractYouTubeId(searchInput)
-                        if (extractedId != searchInput.trim()) {
-                            // Jika input berupa Link/ID YouTube
-                            searchQueryOrId = extractedId
-                            isSearchQuery = false
+                    val query = searchInput.trim()
+                    if (query.isNotEmpty()) {
+                        val videoId = extractYouTubeId(query)
+                        activeTargetUrl = if (videoId != query && videoId.length == 11) {
+                            // Link atau ID YouTube
+                            "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&controls=1&modestbranding=1&rel=0"
                         } else {
-                            // Jika input berupa Judul Lagu / Kata Kunci
-                            searchQueryOrId = searchInput.trim()
-                            isSearchQuery = true
+                            // Pencarian Teks / Judul Lagu secara langsung di WebView
+                            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+                            "https://m.youtube.com/results?search_query=$encodedQuery"
                         }
                     }
                 },
@@ -156,11 +153,9 @@ fun ChordifyAppScreen() {
             }
         }
 
-        // YouTube Embed Player Bersih (Tanpa Search Bar Internal YouTube)
-        CleanYouTubePlayer(
-            queryOrId = searchQueryOrId,
-            isSearch = isSearchQuery,
-            onTimeUpdate = { time -> currentTimeSec = time },
+        // YouTube Player / Search Engine Box
+        ResponsiveYouTubePlayer(
+            targetUrl = activeTargetUrl,
             modifier = Modifier.fillMaxWidth().height(220.dp)
         )
 
@@ -227,75 +222,39 @@ fun ChordifyAppScreen() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun CleanYouTubePlayer(
-    queryOrId: String,
-    isSearch: Boolean,
-    onTimeUpdate: (Float) -> Unit,
+fun ResponsiveYouTubePlayer(
+    targetUrl: String,
     modifier: Modifier = Modifier
 ) {
-    val embedSrc = if (isSearch) {
-        val encodedQuery = URLEncoder.encode(queryOrId, "UTF-8")
-        "https://www.youtube.com/embed?listType=search&list=$encodedQuery&autoplay=1&controls=1&modestbranding=1&rel=0"
-    } else {
-        "https://www.youtube.com/embed/$queryOrId?autoplay=1&controls=1&modestbranding=1&rel=0&enablejsapi=1"
-    }
-
-    val htmlContent = remember(embedSrc) {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { background: #000; height: 100vh; overflow: hidden; }
-                iframe { width: 100%; height: 100%; border: none; }
-            </style>
-        </head>
-        <body>
-            <iframe 
-                id="ytplayer"
-                src="$embedSrc" 
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                allowfullscreen>
-            </iframe>
-            <script>
-                // Basic time listener bridge
-                window.addEventListener('message', function(event) {
-                    try {
-                        var data = JSON.parse(event.data);
-                        if (data.event === 'infoDelivery' && data.info && data.info.currentTime) {
-                            AndroidBridge.onTimeUpdate(data.info.currentTime);
-                        }
-                    } catch(e) {}
-                });
-            </script>
-        </body>
-        </html>
-        """.trimIndent()
-    }
-
     AndroidView(
         factory = { context ->
             WebView(context).apply {
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?) = false
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        val url = request?.url?.toString() ?: ""
+                        // Jika pengguna mengeklik video dari hasil pencarian, konversi otomatis ke Player Embed
+                        if (url.contains("watch?v=")) {
+                            val videoId = url.substringAfter("v=").substringBefore("&")
+                            view?.loadUrl("https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&controls=1&modestbranding=1&rel=0")
+                            return true
+                        }
+                        return false
+                    }
                 }
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     mediaPlaybackRequiresUserGesture = false
+                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
-                addJavascriptInterface(object {
-                    @JavascriptInterface
-                    fun onTimeUpdate(sec: Float) { onTimeUpdate(sec) }
-                }, "AndroidBridge")
-                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+                loadUrl(targetUrl)
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+            if (webView.url != targetUrl) {
+                webView.loadUrl(targetUrl)
+            }
         },
         modifier = modifier
     )
