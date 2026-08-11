@@ -130,10 +130,10 @@ fun YouTubeWebPlayer(
 
         @JavascriptInterface
         fun onTimeUpdate(seconds: Float) {
-            if (Math.abs(seconds - lastLoggedTime) >= 0.5f) {
+            if (!seconds.isFinite() || seconds < 0f) return
+            if (Math.abs(seconds - lastLoggedTime) >= 1.0f) {
                 lastLoggedTime = seconds
-                Log.d(TAG, "PLAYER_TIME=%.2f".format(seconds))
-                Log.d(TAG, "ANDROID_TIME_UPDATE=%.2f".format(seconds))
+                Log.d(TAG, "PLAYER_TIME=%.1f".format(seconds))
             }
             mainHandler.post {
                 currentOnTimeUpdate(seconds)
@@ -158,75 +158,46 @@ fun YouTubeWebPlayer(
     fun injectSyncScript(webView: WebView) {
         val js = """
             (function() {
-                if (window.__chordflyInjected) return;
-                window.__chordflyInjected = true;
-
-                if (window.AndroidBridge) {
-                    window.AndroidBridge.log("JS_BRIDGE_INJECTED");
-                }
+                if (window.__chordflyTimeSync) return;
+                window.__chordflyTimeSync = true;
 
                 var lastTime = -1;
                 var lastState = null;
 
-                function sendTime(time) {
-                    if (typeof time === 'number' && !isNaN(time) && time >= 0) {
+                function update() {
+                    try {
+                        var video = document.querySelector('video');
+                        if (!video) return;
+
+                        var time = Number(video.currentTime);
+                        if (!isFinite(time) || time < 0) return;
+
                         if (Math.abs(time - lastTime) >= 0.05) {
                             lastTime = time;
                             if (window.AndroidBridge) {
                                 window.AndroidBridge.onTimeUpdate(time);
                             }
                         }
-                    }
-                }
 
-                function sendState(isPlaying, stateName) {
-                    if (lastState !== isPlaying) {
-                        lastState = isPlaying;
-                        if (window.AndroidBridge) {
-                            window.AndroidBridge.onStateChange(isPlaying, stateName || (isPlaying ? "PLAYING" : "PAUSED"));
+                        var state;
+                        if (video.ended) {
+                            state = "ENDED";
+                        } else if (video.paused) {
+                            state = "PAUSED";
+                        } else {
+                            state = "PLAYING";
                         }
-                    }
-                }
 
-                window.addEventListener('message', function(event) {
-                    try {
-                        var data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                        if (!data) return;
-
-                        if (data.event === 'infoDelivery' || data.event === 'initialDelivery') {
-                            if (data.info) {
-                                if (data.info.currentTime !== undefined) {
-                                    sendTime(Number(data.info.currentTime));
-                                }
-                                if (data.info.playerState !== undefined) {
-                                    var st = data.info.playerState;
-                                    if (st === 1) sendState(true, "PLAYING");
-                                    else if (st === 2) sendState(false, "PAUSED");
-                                    else if (st === 0) sendState(false, "ENDED");
-                                    else if (st === 3 && window.AndroidBridge) {
-                                        window.AndroidBridge.log("PLAYER_STATE=BUFFERING");
-                                    }
-                                }
+                        if (state !== lastState) {
+                            lastState = state;
+                            if (window.AndroidBridge) {
+                                window.AndroidBridge.onStateChange(state === "PLAYING", state);
                             }
                         }
                     } catch(e) {}
-                });
+                }
 
-                setInterval(function() {
-                    try {
-                        window.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
-
-                        var video = document.querySelector('video');
-                        if (video) {
-                            sendTime(video.currentTime);
-                            if (video.paused || video.ended) {
-                                sendState(false, video.ended ? "ENDED" : "PAUSED");
-                            } else {
-                                sendState(true, "PLAYING");
-                            }
-                        }
-                    } catch(e) {}
-                }, 200);
+                window.__chordflySyncTimer = setInterval(update, 150);
             })();
         """.trimIndent()
 
@@ -352,6 +323,7 @@ fun YouTubeWebPlayer(
         update = { webView ->
             if (webView.tag != videoId) {
                 webView.tag = videoId
+                webView.evaluateJavascript("if (window.__chordflySyncTimer) clearInterval(window.__chordflySyncTimer); window.__chordflyTimeSync = false;", null)
                 webView.setBackgroundColor(Color.BLACK)
                 Log.d(TAG, "VIDEO_ID=$videoId")
                 Log.d(TAG, "EMBED_URL=$embedUrl")
@@ -362,6 +334,7 @@ fun YouTubeWebPlayer(
             }
         },
         onRelease = { webView ->
+            webView.evaluateJavascript("if (window.__chordflySyncTimer) clearInterval(window.__chordflySyncTimer);", null)
             webView.stopLoading()
             webView.destroy()
         },
