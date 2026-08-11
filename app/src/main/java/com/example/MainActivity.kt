@@ -1,9 +1,22 @@
 package com.example
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
+import androidx.browser.customtabs.CustomTabsIntent
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -43,6 +56,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Link
@@ -52,8 +67,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -82,16 +100,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
+import java.io.File
+import java.io.FileOutputStream
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView as PierYouTubePlayerView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -175,7 +203,7 @@ object SampleSongs {
             id = "2",
             title = "Perfect",
             artist = "Ed Sheeran",
-            youtubeId = "2Vv-BfVoq4g",
+            youtubeId = "dQw4w9WgXcQ",
             chords = listOf(
                 ChordTimestamp(0, "G", 0.0f),
                 ChordTimestamp(1, "Em", 3.0f),
@@ -191,7 +219,7 @@ object SampleSongs {
             id = "3",
             title = "Hotel California",
             artist = "Eagles",
-            youtubeId = "09839DpTctU",
+            youtubeId = "L_LUpnjgPso",
             chords = listOf(
                 ChordTimestamp(0, "Bm", 0.0f),
                 ChordTimestamp(1, "F#7", 4.0f),
@@ -207,7 +235,7 @@ object SampleSongs {
             id = "4",
             title = "Riptide",
             artist = "Vance Joy",
-            youtubeId = "uJ_1HMAGb4k",
+            youtubeId = "fJ9rUzIMcZQ",
             chords = listOf(
                 ChordTimestamp(0, "Am", 0.0f),
                 ChordTimestamp(1, "G", 2.0f),
@@ -223,7 +251,7 @@ object SampleSongs {
             id = "5",
             title = "Komang",
             artist = "Raim Laode",
-            youtubeId = "534c0wY_u1M",
+            youtubeId = "kJQP7kiw5Fk",
             chords = listOf(
                 ChordTimestamp(0, "G", 0.0f),
                 ChordTimestamp(1, "D", 3.0f),
@@ -238,7 +266,7 @@ object SampleSongs {
             id = "6",
             title = "Hati-Hati di Jalan",
             artist = "Tulus",
-            youtubeId = "81y13Xz9a2I",
+            youtubeId = "hT_nvWreIhg",
             chords = listOf(
                 ChordTimestamp(0, "C", 0.0f),
                 ChordTimestamp(1, "Em", 3.5f),
@@ -425,6 +453,7 @@ fun ChordifyScreen(viewModel: ChordifyViewModel) {
     val coroutineScope = rememberCoroutineScope()
 
     var showSearchSheet by remember { mutableStateOf(false) }
+    var showExportSheet by remember { mutableStateOf(false) }
 
     // Auto-scroll grid to active chord
     LaunchedEffect(activeIndex) {
@@ -473,6 +502,23 @@ fun ChordifyScreen(viewModel: ChordifyViewModel) {
                             )
                         }
                         Spacer(modifier = Modifier.weight(1f))
+                        // Export Chord Sheet Button
+                        IconButton(
+                            onClick = { showExportSheet = true },
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF2C2C2C))
+                                .testTag("export_chord_top_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Export Chords",
+                                tint = Color(0xFF00FF88)
+                            )
+                        }
+
                         // YouTube Search Trigger Button
                         IconButton(
                             onClick = { showSearchSheet = true },
@@ -596,21 +642,51 @@ fun ChordifyScreen(viewModel: ChordifyViewModel) {
                     letterSpacing = 1.5.sp
                 )
 
-                if (isAnalyzing) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = "AI Analyzing",
-                            tint = Color(0xFF00FF88),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "AI Analyzing...",
-                            color = Color(0xFF00FF88),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isAnalyzing) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "AI Analyzing",
+                                tint = Color(0xFF00FF88),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "AI Analyzing...",
+                                color = Color(0xFF00FF88),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x2600FF88))
+                            .clickable { showExportSheet = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("export_header_button")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Ekspor",
+                                tint = Color(0xFF00FF88),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "EKSPOR",
+                                color = Color(0xFF00FF88),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -642,6 +718,15 @@ fun ChordifyScreen(viewModel: ChordifyViewModel) {
                     viewModel.loadCustomYouTubeId(videoId, title)
                     showSearchSheet = false
                 }
+            )
+        }
+
+        // BottomSheet for Exporting Chord Sheet (Text & PDF)
+        if (showExportSheet) {
+            ExportChordBottomSheet(
+                song = currentSong,
+                transposeOffset = transposeOffset,
+                onDismiss = { showExportSheet = false }
             )
         }
     }
@@ -861,20 +946,352 @@ fun SongCatalogRow(
 }
 
 // ==========================================
-// 5. YOUTUBE WEBVIEW PLAYER & JS BRIDGE
+// 4.1 EXPORT CHORD SHEET BOTTOM SHEET
 // ==========================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExportChordBottomSheet(
+    song: SongItem,
+    transposeOffset: Int,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val keyShiftText = remember(transposeOffset) {
+        if (transposeOffset == 0) "Nada Dasar Asli (0 semiton)"
+        else if (transposeOffset > 0) "+$transposeOffset semiton"
+        else "$transposeOffset semiton"
+    }
+
+    val formattedText = remember(song, transposeOffset) {
+        buildString {
+            appendLine("🎵 ${song.title.uppercase()} - ${song.artist.uppercase()} 🎵")
+            appendLine("Transposisi Kunci: $keyShiftText")
+            appendLine("----------------------------------------")
+            appendLine(String.format("%-12s | %s", "Waktu", "Kunci Chord"))
+            appendLine("----------------------------------------")
+            song.chords.forEach { item ->
+                val transposed = ChordTransposer.transpose(item.chord, transposeOffset)
+                val timeStr = String.format("%.1fs", item.timeSec)
+                appendLine(String.format("%-12s | %s", timeStr, transposed))
+            }
+            appendLine("----------------------------------------")
+            appendLine("Diekspor via Chordfly AI App")
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF1E1E1E),
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0x2600FF88)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = null,
+                        tint = Color(0xFF00FF88),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "Ekspor Progression Chord",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "${song.title} - ${song.artist}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF00FF88)
+                    )
+                }
+            }
+
+            // Key Transposition Info Badge
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF2C2C2C))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Status Transposisi:",
+                    fontSize = 11.sp,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = keyShiftText,
+                    fontSize = 11.sp,
+                    color = Color(0xFF00FF88),
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Text Preview Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF121212))
+                    .border(1.dp, Color(0xFF333333), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                LazyColumn {
+                    item {
+                        Text(
+                            text = formattedText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            color = Color(0xFFE0E0E0),
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Copy Text Button
+                Button(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("Chord Sheet", formattedText)
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(context, "Progression chord berhasil disalin!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("copy_text_button"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2C2C2C),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "Salin Teks", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Share Text Button
+                Button(
+                    onClick = {
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            putExtra(Intent.EXTRA_SUBJECT, "Chord ${song.title} - ${song.artist}")
+                            putExtra(Intent.EXTRA_TEXT, formattedText)
+                            type = "text/plain"
+                        }
+                        val shareIntent = Intent.createChooser(sendIntent, "Bagikan Progression Chord")
+                        context.startActivity(shareIntent)
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("share_text_button"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00FF88),
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.Black
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "Bagikan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Export as PDF Button
+            Button(
+                onClick = {
+                    exportSongPdf(context, song, transposeOffset, keyShiftText)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("export_pdf_button"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF252525),
+                    contentColor = Color(0xFF00FF88)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Description,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Color(0xFF00FF88)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(text = "Ekspor sebagai Dokumen PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+fun exportSongPdf(
+    context: Context,
+    song: SongItem,
+    transposeOffset: Int,
+    keyShiftText: String
+) {
+    try {
+        val pdfDocument = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas = page.canvas
+
+        val titlePaint = Paint().apply {
+            color = AndroidColor.BLACK
+            textSize = 20f
+            isFakeBoldText = true
+        }
+
+        val subTitlePaint = Paint().apply {
+            color = AndroidColor.DKGRAY
+            textSize = 13f
+        }
+
+        val textPaint = Paint().apply {
+            color = AndroidColor.BLACK
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+        }
+
+        val linePaint = Paint().apply {
+            color = AndroidColor.LTGRAY
+            strokeWidth = 1f
+        }
+
+        var y = 50f
+        canvas.drawText("🎵 CHORDFLY - CHORD SHEET 🎵", 40f, y, titlePaint)
+        y += 30f
+        canvas.drawText("Lagu: ${song.title} - ${song.artist}", 40f, y, subTitlePaint)
+        y += 20f
+        canvas.drawText("Transposisi Kunci: $keyShiftText", 40f, y, subTitlePaint)
+        y += 18f
+        canvas.drawLine(40f, y, 555f, y, linePaint)
+        y += 30f
+
+        val headerPaint = Paint().apply {
+            color = AndroidColor.BLACK
+            textSize = 13f
+            isFakeBoldText = true
+            typeface = Typeface.MONOSPACE
+        }
+        canvas.drawText(String.format("%-12s | %s", "Waktu", "Kunci Chord"), 40f, y, headerPaint)
+        y += 15f
+        canvas.drawLine(40f, y, 555f, y, linePaint)
+        y += 22f
+
+        song.chords.forEach { item ->
+            val transposed = ChordTransposer.transpose(item.chord, transposeOffset)
+            val timeStr = String.format("%.1fs", item.timeSec)
+            val lineStr = String.format("%-12s | %s", timeStr, transposed)
+            canvas.drawText(lineStr, 40f, y, textPaint)
+            y += 22f
+        }
+
+        y += 20f
+        canvas.drawLine(40f, y, 555f, y, linePaint)
+        y += 25f
+        canvas.drawText("Dibuat otomatis oleh Chordfly AI", 40f, y, subTitlePaint.apply { textSize = 10f })
+
+        pdfDocument.finishPage(page)
+
+        val fileName = "Chord_${song.title.replace(" ", "_")}.pdf"
+        val pdfFile = File(context.cacheDir, fileName)
+        val fos = FileOutputStream(pdfFile)
+        pdfDocument.writeTo(fos)
+        pdfDocument.close()
+        fos.close()
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            pdfFile
+        )
+
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Chord ${song.title} - ${song.artist} (PDF)")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Bagikan PDF Chord Sheet"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Gagal membuat PDF: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
+
+// ==========================================
+// 5. YOUTUBE CUSTOM TABS PLAYER & ACTION CARD
+// ==========================================
+
+fun openYouTubeInBrowser(context: Context, videoId: String) {
+    val url = "https://www.youtube.com/watch?v=$videoId"
+    val customTabsIntent = CustomTabsIntent.Builder().build()
+    customTabsIntent.launchUrl(context, Uri.parse(url))
+}
+
+@Composable
+fun PlayOnBrowserButton(videoId: String) {
+    val context = LocalContext.current
+    
+    Button(onClick = { openYouTubeInBrowser(context, videoId) }) {
+        Text("Putar Video di Browser / YouTube App")
+    }
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun YouTubePlayerView(
     videoId: String,
-    isPlaying: Boolean,
-    onTimeUpdate: (Float) -> Unit,
-    onStateChange: (Boolean) -> Unit,
+    isPlaying: Boolean = false,
+    onTimeUpdate: (Float) -> Unit = {},
+    onStateChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var playerErrorMsg by remember { mutableStateOf<String?>(null) }
-
     val htmlContent = remember(videoId) {
         """
         <!DOCTYPE html>
@@ -882,14 +1299,14 @@ fun YouTubePlayerView(
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                body, html { width: 100%; height: 100%; background: #000; overflow: hidden; }
-                #player { width: 100%; height: 100%; }
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+                #player { width: 100%; height: 100%; border: none; }
             </style>
         </head>
         <body>
             <div id="player"></div>
-            <script src="https://www.youtube.com/iframe_api"></script>
+            <script src="https://www.youtube-nocookie.com/iframe_api"></script>
             <script>
                 var player;
                 function onYouTubeIframeAPIReady() {
@@ -897,54 +1314,38 @@ fun YouTubePlayerView(
                         height: '100%',
                         width: '100%',
                         videoId: '$videoId',
+                        host: 'https://www.youtube-nocookie.com',
                         playerVars: {
                             'playsinline': 1,
                             'controls': 1,
-                            'autoplay': 0,
                             'rel': 0,
-                            'modestbranding': 1,
+                            'autoplay': 0,
                             'enablejsapi': 1,
-                            'origin': 'https://www.youtube.com'
+                            'origin': 'https://www.youtube-nocookie.com'
                         },
                         events: {
-                            'onReady': onPlayerReady,
-                            'onStateChange': onPlayerStateChange,
-                            'onError': onPlayerError
+                            'onStateChange': onPlayerStateChange
                         }
                     });
                 }
 
-                function onPlayerReady(event) {
-                    if (window.AndroidBridge && window.AndroidBridge.onReady) {
-                        window.AndroidBridge.onReady();
-                    }
-                }
-
-                var timer = null;
+                var timer;
                 function onPlayerStateChange(event) {
                     if (event.data == YT.PlayerState.PLAYING) {
-                        if (window.AndroidBridge && window.AndroidBridge.onStateChange) {
-                            window.AndroidBridge.onStateChange(true);
-                        }
-                        if (timer) clearInterval(timer);
-                        timer = setInterval(function() {
-                            if (player && player.getCurrentTime) {
-                                if (window.AndroidBridge && window.AndroidBridge.onTimeUpdate) {
-                                    window.AndroidBridge.onTimeUpdate(player.getCurrentTime());
+                        if (window.AndroidBridge) AndroidBridge.onStateChange(true);
+                        if (!timer) {
+                            timer = setInterval(function() {
+                                if (player && player.getCurrentTime) {
+                                    if (window.AndroidBridge) AndroidBridge.onTimeUpdate(player.getCurrentTime());
                                 }
-                            }
-                        }, 200);
-                    } else {
-                        if (window.AndroidBridge && window.AndroidBridge.onStateChange) {
-                            window.AndroidBridge.onStateChange(false);
+                            }, 200);
                         }
-                        if (timer) clearInterval(timer);
-                    }
-                }
-
-                function onPlayerError(event) {
-                    if (window.AndroidBridge && window.AndroidBridge.onError) {
-                        window.AndroidBridge.onError("Kode Error: " + event.data);
+                    } else {
+                        if (window.AndroidBridge) AndroidBridge.onStateChange(false);
+                        if (timer) {
+                            clearInterval(timer);
+                            timer = null;
+                        }
                     }
                 }
             </script>
@@ -953,105 +1354,67 @@ fun YouTubePlayerView(
         """.trimIndent()
     }
 
-    var lastLoadedVideoId by remember { mutableStateOf("") }
+    AndroidView(
+        factory = { context ->
+            WebView(context).apply {
+                webChromeClient = WebChromeClient()
 
-    Box(modifier = modifier) {
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    settings.javaScriptCanOpenWindowsAutomatically = true
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
-                    settings.allowFileAccess = true
-                    settings.allowContentAccess = true
-                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
-
-                    webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                            return false
+                // Mencegah HP mengalihkan pemutaran ke Aplikasi YouTube Luar
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        val url = request?.url?.toString() ?: ""
+                        return if (url.contains("youtube.com/embed") || url.contains("youtube.com/iframe_api") || url.contains("youtube-nocookie.com")) {
+                            false
+                        } else {
+                            true
                         }
                     }
 
-                    addJavascriptInterface(object {
-                        @JavascriptInterface
-                        fun onReady() {
-                            playerErrorMsg = null
+                    @Suppress("DEPRECATION")
+                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                        val currentUrl = url ?: ""
+                        return if (currentUrl.contains("youtube.com/embed") || currentUrl.contains("youtube.com/iframe_api") || currentUrl.contains("youtube-nocookie.com")) {
+                            false
+                        } else {
+                            true
                         }
-
-                        @JavascriptInterface
-                        fun onTimeUpdate(seconds: Float) {
-                            onTimeUpdate(seconds)
-                        }
-
-                        @JavascriptInterface
-                        fun onStateChange(isPlaying: Boolean) {
-                            onStateChange(isPlaying)
-                        }
-
-                        @JavascriptInterface
-                        fun onError(msg: String) {
-                            playerErrorMsg = msg
-                        }
-                    }, "AndroidBridge")
-
-                    loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
-                    lastLoadedVideoId = videoId
-                }
-            },
-            update = { webView ->
-                if (lastLoadedVideoId != videoId) {
-                    playerErrorMsg = null
-                    lastLoadedVideoId = videoId
-                    webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
-                } else {
-                    val js = if (isPlaying) {
-                        "if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }"
-                    } else {
-                        "if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }"
                     }
-                    webView.evaluateJavascript(js, null)
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
 
-        if (playerErrorMsg != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f))
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = Color(0xFF00FF88),
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Video YouTube Dibatasi Pemilik",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Kunci chord & audio synthesizer tetap aktif.",
-                        color = Color.Gray,
-                        fontSize = 11.sp
-                    )
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    mediaPlaybackRequiresUserGesture = false
+                    userAgentString = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
+
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun onTimeUpdate(seconds: Float) {
+                        onTimeUpdate(seconds)
+                    }
+
+                    @JavascriptInterface
+                    fun onStateChange(playing: Boolean) {
+                        onStateChange(playing)
+                    }
+                }, "AndroidBridge")
+
+                loadDataWithBaseURL("https://www.youtube-nocookie.com", htmlContent, "text/html", "UTF-8", null)
             }
-        }
-    }
+        },
+        update = { webView ->
+            if (webView.url == null || !webView.url!!.contains(videoId)) {
+                webView.loadDataWithBaseURL("https://www.youtube-nocookie.com", htmlContent, "text/html", "UTF-8", null)
+            }
+        },
+        modifier = modifier
+    )
 }
 
 // ==========================================
@@ -1377,4 +1740,15 @@ fun ChordifyTheme(content: @Composable () -> Unit) {
         ),
         content = content
     )
+}
+
+// EKSTRAKSI LINK ATAU ID YOUTUBE
+fun extractYouTubeId(input: String): String {
+    val cleanInput = input.trim()
+    return when {
+        cleanInput.contains("v=") -> cleanInput.substringAfter("v=").substringBefore("&")
+        cleanInput.contains("youtu.be/") -> cleanInput.substringAfter("youtu.be/").substringBefore("?")
+        cleanInput.length == 11 -> cleanInput
+        else -> cleanInput
+    }
 }

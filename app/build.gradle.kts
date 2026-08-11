@@ -111,6 +111,8 @@ dependencies {
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)
   implementation(libs.firebase.appcheck.recaptcha)
+  implementation("androidx.browser:browser:1.8.0")
+  implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
