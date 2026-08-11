@@ -4,8 +4,10 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
@@ -101,7 +103,9 @@ fun YouTubeWebPlayer(
         chromeClient.onHideCustomView()
     }
 
-    val htmlContent = remember(targetUrl) {
+    val videoId = remember(targetUrl) { extractYouTubeId(targetUrl) }
+
+    val htmlContent = remember(videoId) {
         """
         <!DOCTYPE html>
         <html>
@@ -110,30 +114,118 @@ fun YouTubeWebPlayer(
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { background: #000; width: 100vw; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-                iframe { width: 100%; height: 100%; border: none; }
+                #player { width: 100vw; height: 100vh; border: none; }
             </style>
         </head>
         <body>
-            <iframe 
-                id="ytplayer"
-                src="$targetUrl" 
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" 
-                allowfullscreen>
-            </iframe>
+            <div id="player"></div>
             <script>
-                window.addEventListener('message', function(event) {
+                var tag = document.createElement('script');
+                tag.src = "https://www.youtube.com/iframe_api";
+                var firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+                var player;
+                var timeInterval = null;
+
+                function onYouTubeIframeAPIReady() {
+                    if (window.AndroidBridge) {
+                        window.AndroidBridge.logMessage("PLAYER_API_READY");
+                    }
+                    player = new YT.Player('player', {
+                        height: '100%',
+                        width: '100%',
+                        videoId: '$videoId',
+                        playerVars: {
+                            'autoplay': 1,
+                            'controls': 1,
+                            'playsinline': 1,
+                            'rel': 0,
+                            'enablejsapi': 1,
+                            'origin': 'https://www.youtube.com'
+                        },
+                        events: {
+                            'onReady': onPlayerReady,
+                            'onStateChange': onPlayerStateChange,
+                            'onError': onPlayerError,
+                            'onAutoplayBlocked': onAutoplayBlocked
+                        }
+                    });
+                }
+
+                function onPlayerReady(event) {
+                    if (window.AndroidBridge) {
+                        window.AndroidBridge.logMessage("PLAYER_READY");
+                    }
                     try {
-                        var data = JSON.parse(event.data);
-                        if (data.event === 'infoDelivery' && data.info) {
-                            if (data.info.currentTime !== undefined && window.AndroidBridge) {
-                                AndroidBridge.onTimeUpdate(data.info.currentTime);
-                            }
-                            if (data.info.playerState !== undefined && window.AndroidBridge) {
-                                AndroidBridge.onStateChange(data.info.playerState === 1);
+                        event.target.playVideo();
+                    } catch(e) {}
+                }
+
+                function startTimeTracker() {
+                    stopTimeTracker();
+                    timeInterval = setInterval(function() {
+                        if (player && typeof player.getCurrentTime === 'function' && window.AndroidBridge) {
+                            var curTime = player.getCurrentTime();
+                            if (curTime !== undefined) {
+                                window.AndroidBridge.onTimeUpdate(curTime);
                             }
                         }
-                    } catch(e) {}
-                });
+                    }, 200);
+                }
+
+                function stopTimeTracker() {
+                    if (timeInterval) {
+                        clearInterval(timeInterval);
+                        timeInterval = null;
+                    }
+                }
+
+                function sendCurrentTime() {
+                    if (player && typeof player.getCurrentTime === 'function' && window.AndroidBridge) {
+                        var curTime = player.getCurrentTime();
+                        if (curTime !== undefined) {
+                            window.AndroidBridge.onTimeUpdate(curTime);
+                        }
+                    }
+                }
+
+                function onPlayerStateChange(event) {
+                    var state = event.data;
+                    if (window.AndroidBridge) {
+                        if (state === YT.PlayerState.PLAYING) {
+                            window.AndroidBridge.logMessage("PLAYER_PLAYING");
+                            window.AndroidBridge.onStateChange(true);
+                            startTimeTracker();
+                        } else if (state === YT.PlayerState.PAUSED) {
+                            window.AndroidBridge.logMessage("PLAYER_PAUSED");
+                            window.AndroidBridge.onStateChange(false);
+                            stopTimeTracker();
+                            sendCurrentTime();
+                        } else if (state === YT.PlayerState.BUFFERING) {
+                            window.AndroidBridge.logMessage("PLAYER_BUFFERING");
+                        } else if (state === YT.PlayerState.ENDED) {
+                            window.AndroidBridge.logMessage("PLAYER_ENDED");
+                            window.AndroidBridge.onStateChange(false);
+                            stopTimeTracker();
+                            sendCurrentTime();
+                        }
+                    }
+                }
+
+                function onPlayerError(event) {
+                    if (window.AndroidBridge) {
+                        window.AndroidBridge.onPlayerError(event.data);
+                        window.AndroidBridge.logMessage("PLAYER_ERROR=" + event.data);
+                    }
+                }
+
+                function onAutoplayBlocked() {
+                    if (window.AndroidBridge) {
+                        window.AndroidBridge.logMessage("PLAYER_AUTOPLAY_BLOCKED");
+                        window.AndroidBridge.onAutoplayBlocked();
+                    }
+                }
             </script>
         </body>
         </html>
@@ -143,6 +235,7 @@ fun YouTubeWebPlayer(
     AndroidView(
         factory = { ctx ->
             WebView(ctx).apply {
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 webChromeClient = chromeClient
                 webViewClient = object : WebViewClient() {
                     override fun onRenderProcessGone(
@@ -190,15 +283,30 @@ fun YouTubeWebPlayer(
                     fun onStateChange(playing: Boolean) {
                         onStateChange(playing)
                     }
+
+                    @JavascriptInterface
+                    fun onPlayerError(errorCode: Int) {
+                        Log.e("CHORDFLY_YOUTUBE", "PLAYER_ERROR=$errorCode")
+                    }
+
+                    @JavascriptInterface
+                    fun onAutoplayBlocked() {
+                        Log.w("CHORDFLY_YOUTUBE", "PLAYER_AUTOPLAY_BLOCKED")
+                    }
+
+                    @JavascriptInterface
+                    fun logMessage(msg: String) {
+                        Log.d("CHORDFLY_YOUTUBE", msg)
+                    }
                 }, "AndroidBridge")
 
-                tag = targetUrl
+                tag = videoId
                 loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
-            if (webView.tag != targetUrl) {
-                webView.tag = targetUrl
+            if (webView.tag != videoId) {
+                webView.tag = videoId
                 webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
