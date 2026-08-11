@@ -43,8 +43,8 @@ import com.example.ui.ChordTimelineGrid
 import com.example.ui.CurrentChordCard
 import com.example.ui.HeaderBar
 import com.example.ui.NextChordsRow
+import com.example.ui.SongSearchScreen
 import com.example.ui.TransportControls
-import com.example.youtube.YouTubeSearchWebView
 import com.example.youtube.YouTubeWebPlayer
 
 class MainActivity : ComponentActivity() {
@@ -93,13 +93,19 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
     }
 
     if (youtubeState.showYouTubeSearch) {
-        YouTubeSearchWebView(
+        SongSearchScreen(
             query = youtubeState.searchQuery,
-            onVideoSelected = { videoId ->
-                viewModel.selectYouTubeVideo(videoId)
-            },
-            onClose = {
-                viewModel.closeYouTubeSearch()
+            results = youtubeState.searchResults,
+            isLoading = youtubeState.isSearching,
+            searchError = youtubeState.searchError,
+            selectedTab = youtubeState.selectedSearchTab,
+            onQueryChange = { viewModel.onSearchQueryChange(it) },
+            onSearchSubmit = { viewModel.performSearch() },
+            onTabSelected = { viewModel.setSearchTab(it) },
+            onBack = { viewModel.closeYouTubeSearch() },
+            onClear = { viewModel.clearYouTubeSearch() },
+            onSongClick = { song ->
+                viewModel.selectYouTubeVideo(song.videoId, song.title)
             }
         )
     } else {

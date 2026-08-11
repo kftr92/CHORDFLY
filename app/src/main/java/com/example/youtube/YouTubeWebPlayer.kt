@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -144,6 +145,18 @@ fun YouTubeWebPlayer(
             WebView(ctx).apply {
                 webChromeClient = chromeClient
                 webViewClient = object : WebViewClient() {
+                    override fun onRenderProcessGone(
+                        view: WebView?,
+                        detail: RenderProcessGoneDetail?
+                    ): Boolean {
+                        view?.let {
+                            val parent = it.parent as? ViewGroup
+                            parent?.removeView(it)
+                            it.destroy()
+                        }
+                        return true
+                    }
+
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?

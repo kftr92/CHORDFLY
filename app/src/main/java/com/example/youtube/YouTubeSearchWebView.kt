@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
+import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -230,6 +232,18 @@ fun YouTubeSearchWebView(
                         }
 
                         webViewClient = object : WebViewClient() {
+                            override fun onRenderProcessGone(
+                                view: WebView?,
+                                detail: RenderProcessGoneDetail?
+                            ): Boolean {
+                                view?.let {
+                                    val parent = it.parent as? android.view.ViewGroup
+                                    parent?.removeView(it)
+                                    it.destroy()
+                                }
+                                return true
+                            }
+
                             private fun checkForVideoSelection(url: String?): Boolean {
                                 if (url.isNullOrBlank()) return false
 

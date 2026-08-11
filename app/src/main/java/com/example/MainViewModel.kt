@@ -7,9 +7,12 @@ import com.example.ai.GeminiChordAnalyzer
 import com.example.audio.AudioChordEngine
 import com.example.model.ChordFlyUiState
 import com.example.model.ChordTimestamp
+import com.example.model.SearchTab
+import com.example.model.SongSearchResult
 import com.example.model.YouTubeUiState
 import com.example.music.ChordParser
 import com.example.music.ChordTransposer
+import com.example.youtube.YouTubeSearchService
 import com.example.youtube.YouTubeUrlParser
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -110,26 +113,74 @@ class MainViewModel : ViewModel() {
             return
         }
 
-        Log.d(TAG, "SEARCH_QUERY=$query")
+        performSearch(query)
+    }
+
+    fun performSearch(query: String = _youtubeState.value.searchQuery) {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) return
+
+        Log.d(TAG, "SEARCH_QUERY=$cleanQuery")
         _youtubeState.update {
             it.copy(
+                searchQuery = cleanQuery,
                 showYouTubeSearch = true,
-                status = "Mencari '$query' di YouTube..."
+                isSearching = true,
+                searchError = null,
+                status = "Mencari '$cleanQuery'..."
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val results = YouTubeSearchService.searchSongs(cleanQuery)
+                _youtubeState.update {
+                    it.copy(
+                        isSearching = false,
+                        searchResults = results,
+                        searchError = if (results.isEmpty()) "Lagu '$cleanQuery' tidak ditemukan" else null,
+                        status = "Ditemukan ${results.size} hasil"
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Search failed", e)
+                _youtubeState.update {
+                    it.copy(
+                        isSearching = false,
+                        searchError = e.localizedMessage ?: "Gagal terhubung ke pencarian",
+                        status = "Pencarian gagal"
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearYouTubeSearch() {
+        _youtubeState.update {
+            it.copy(
+                searchQuery = "",
+                searchResults = emptyList(),
+                searchError = null
             )
         }
     }
 
-    fun selectYouTubeVideo(videoId: String) {
+    fun setSearchTab(tab: SearchTab) {
+        _youtubeState.update { it.copy(selectedSearchTab = tab) }
+    }
+
+    fun selectYouTubeVideo(videoId: String, titleHint: String? = null) {
         Log.d(TAG, "VIDEO_ID_DETECTED=$videoId")
 
         val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&controls=1&modestbranding=1&rel=0&enablejsapi=1"
         Log.d(TAG, "PLAYER_LOAD=$embedUrl")
 
-        val songTitle = if (_youtubeState.value.searchQuery.isNotBlank()) {
-            _youtubeState.value.searchQuery
-        } else {
-            "YouTube Video ($videoId)"
-        }
+        val songTitle = titleHint?.ifBlank { null }
+            ?: if (_youtubeState.value.searchQuery.isNotBlank()) {
+                _youtubeState.value.searchQuery
+            } else {
+                "YouTube Video ($videoId)"
+            }
 
         _youtubeState.update {
             it.copy(
