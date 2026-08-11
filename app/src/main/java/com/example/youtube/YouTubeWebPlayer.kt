@@ -5,11 +5,14 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.net.http.SslError
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -117,6 +120,13 @@ fun YouTubeWebPlayer(
     AndroidView(
         factory = { ctx ->
             WebView(ctx).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setBackgroundColor(Color.BLACK)
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 webChromeClient = chromeClient
                 webViewClient = object : WebViewClient() {
@@ -128,6 +138,17 @@ fun YouTubeWebPlayer(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         Log.d(TAG, "PAGE_FINISHED=$url")
+                        view?.let {
+                            Log.d(TAG, "WEBVIEW_SIZE=${it.width}x${it.height}")
+                            Log.d(TAG, "WEBVIEW_VISIBLE=${it.visibility == View.VISIBLE}")
+                            Log.d(TAG, "WEBVIEW_ALPHA=${it.alpha}")
+                            Log.d(TAG, "WEBVIEW_SCALE=${it.scaleX}")
+                        }
+                    }
+
+                    override fun onPageCommitVisible(view: WebView?, url: String?) {
+                        super.onPageCommitVisible(view, url)
+                        Log.d(TAG, "PAGE_COMMIT_VISIBLE=$url")
                     }
 
                     override fun onReceivedError(
@@ -148,10 +169,20 @@ fun YouTubeWebPlayer(
                         Log.e(TAG, "HTTP_ERROR=${errorResponse?.statusCode} - ${request?.url}")
                     }
 
+                    override fun onReceivedSslError(
+                        view: WebView?,
+                        handler: SslErrorHandler?,
+                        error: SslError?
+                    ) {
+                        Log.e(TAG, "SSL_ERROR=${error?.url} - $error")
+                        super.onReceivedSslError(view, handler, error)
+                    }
+
                     override fun onRenderProcessGone(
                         view: WebView?,
                         detail: RenderProcessGoneDetail?
                     ): Boolean {
+                        Log.e(TAG, "RENDER_PROCESS_GONE=didCrash:${detail?.didCrash()}")
                         view?.let {
                             val parent = it.parent as? ViewGroup
                             parent?.removeView(it)
@@ -182,6 +213,8 @@ fun YouTubeWebPlayer(
                     mediaPlaybackRequiresUserGesture = false
                     loadsImagesAutomatically = true
                     blockNetworkImage = false
+                    allowContentAccess = true
+                    allowFileAccess = true
                 }
 
                 tag = videoId
@@ -196,6 +229,7 @@ fun YouTubeWebPlayer(
         update = { webView ->
             if (webView.tag != videoId) {
                 webView.tag = videoId
+                webView.setBackgroundColor(Color.BLACK)
                 Log.d(TAG, "VIDEO_ID=$videoId")
                 Log.d(TAG, "EMBED_URL=$embedUrl")
                 Log.d(TAG, "REFERER=$REFERER_HEADER")
