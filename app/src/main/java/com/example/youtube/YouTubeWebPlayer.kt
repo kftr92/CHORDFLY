@@ -1,15 +1,82 @@
 package com.example.youtube
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+
+fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
+}
+
+class FullscreenWebChromeClient(
+    private val activity: Activity?,
+    private val onFullscreenChanged: (Boolean) -> Unit
+) : WebChromeClient() {
+    private var customView: View? = null
+    private var customViewCallback: CustomViewCallback? = null
+
+    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+        if (customView != null) {
+            onHideCustomView()
+            return
+        }
+
+        customView = view
+        customViewCallback = callback
+
+        activity?.let { act ->
+            val contentContainer = act.findViewById<ViewGroup>(android.R.id.content)
+                ?: (act.window.decorView as? ViewGroup)
+            contentContainer?.addView(
+                view,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        onFullscreenChanged(true)
+    }
+
+    override fun onHideCustomView() {
+        if (customView == null) return
+
+        activity?.let { act ->
+            val contentContainer = act.findViewById<ViewGroup>(android.R.id.content)
+                ?: (act.window.decorView as? ViewGroup)
+            contentContainer?.removeView(customView)
+        }
+
+        customViewCallback?.onCustomViewHidden()
+        customView = null
+        customViewCallback = null
+
+        onFullscreenChanged(false)
+    }
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -19,6 +86,20 @@ fun YouTubeWebPlayer(
     onStateChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    var isFullscreen by remember { mutableStateOf(false) }
+
+    val chromeClient = remember(activity) {
+        FullscreenWebChromeClient(activity) { inFullscreen ->
+            isFullscreen = inFullscreen
+        }
+    }
+
+    BackHandler(enabled = isFullscreen) {
+        chromeClient.onHideCustomView()
+    }
+
     val htmlContent = remember(targetUrl) {
         """
         <!DOCTYPE html>
@@ -35,7 +116,7 @@ fun YouTubeWebPlayer(
             <iframe 
                 id="ytplayer"
                 src="$targetUrl" 
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" 
                 allowfullscreen>
             </iframe>
             <script>
@@ -59,19 +140,20 @@ fun YouTubeWebPlayer(
     }
 
     AndroidView(
-        factory = { context ->
-            WebView(context).apply {
-                webChromeClient = WebChromeClient()
+        factory = { ctx ->
+            WebView(ctx).apply {
+                webChromeClient = chromeClient
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): Boolean {
                         val url = request?.url?.toString() ?: ""
-                        if (url.contains("watch?v=")) {
-                            val videoId = extractYouTubeId(url)
-                            val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&controls=1&modestbranding=1&rel=0&enablejsapi=1"
-                            view?.loadUrl(embedUrl)
+                        if (url.startsWith("intent://") ||
+                            url.startsWith("youtube://") ||
+                            url.startsWith("vnd.youtube://") ||
+                            url.startsWith("market://")
+                        ) {
                             return true
                         }
                         return false
@@ -97,11 +179,15 @@ fun YouTubeWebPlayer(
                     }
                 }, "AndroidBridge")
 
+                tag = targetUrl
                 loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+            if (webView.tag != targetUrl) {
+                webView.tag = targetUrl
+                webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+            }
         },
         onRelease = { webView ->
             webView.stopLoading()
