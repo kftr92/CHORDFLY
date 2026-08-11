@@ -1300,13 +1300,13 @@ fun YouTubePlayerView(
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-                #player { width: 100%; height: 100%; border: none; }
+                body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+                #player { width: 100%; height: 100%; }
             </style>
         </head>
         <body>
             <div id="player"></div>
-            <script src="https://www.youtube-nocookie.com/iframe_api"></script>
+            <script src="https://www.youtube.com/iframe_api"></script>
             <script>
                 var player;
                 function onYouTubeIframeAPIReady() {
@@ -1314,14 +1314,12 @@ fun YouTubePlayerView(
                         height: '100%',
                         width: '100%',
                         videoId: '$videoId',
-                        host: 'https://www.youtube-nocookie.com',
                         playerVars: {
                             'playsinline': 1,
                             'controls': 1,
                             'rel': 0,
-                            'autoplay': 0,
                             'enablejsapi': 1,
-                            'origin': 'https://www.youtube-nocookie.com'
+                            'origin': 'https://www.youtube.com'
                         },
                         events: {
                             'onStateChange': onPlayerStateChange
@@ -1359,28 +1357,18 @@ fun YouTubePlayerView(
             WebView(context).apply {
                 webChromeClient = WebChromeClient()
 
-                // Mencegah HP mengalihkan pemutaran ke Aplikasi YouTube Luar
+                // Mencegah interaksi tap pada video melempar navigasi ke Aplikasi YouTube Luar
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): Boolean {
-                        val url = request?.url?.toString() ?: ""
-                        return if (url.contains("youtube.com/embed") || url.contains("youtube.com/iframe_api") || url.contains("youtube-nocookie.com")) {
-                            false
-                        } else {
-                            true
-                        }
+                        return false // Tetap muat di dalam WebView
                     }
 
                     @Suppress("DEPRECATION")
                     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                        val currentUrl = url ?: ""
-                        return if (currentUrl.contains("youtube.com/embed") || currentUrl.contains("youtube.com/iframe_api") || currentUrl.contains("youtube-nocookie.com")) {
-                            false
-                        } else {
-                            true
-                        }
+                        return false // Tetap muat di dalam WebView
                     }
                 }
 
@@ -1390,7 +1378,7 @@ fun YouTubePlayerView(
                     allowFileAccess = true
                     allowContentAccess = true
                     mediaPlaybackRequiresUserGesture = false
-                    userAgentString = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
 
                 addJavascriptInterface(object {
@@ -1405,12 +1393,12 @@ fun YouTubePlayerView(
                     }
                 }, "AndroidBridge")
 
-                loadDataWithBaseURL("https://www.youtube-nocookie.com", htmlContent, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
             if (webView.url == null || !webView.url!!.contains(videoId)) {
-                webView.loadDataWithBaseURL("https://www.youtube-nocookie.com", htmlContent, "text/html", "UTF-8", null)
+                webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
         modifier = modifier
@@ -1742,12 +1730,13 @@ fun ChordifyTheme(content: @Composable () -> Unit) {
     )
 }
 
-// EKSTRAKSI LINK ATAU ID YOUTUBE
+// FUNGSI PEMBERSIH & EKSTRAKSI ID YOUTUBE FLEXIBEL
 fun extractYouTubeId(input: String): String {
     val cleanInput = input.trim()
     return when {
         cleanInput.contains("v=") -> cleanInput.substringAfter("v=").substringBefore("&")
         cleanInput.contains("youtu.be/") -> cleanInput.substringAfter("youtu.be/").substringBefore("?")
+        cleanInput.contains("embed/") -> cleanInput.substringAfter("embed/").substringBefore("?")
         cleanInput.length == 11 -> cleanInput
         else -> cleanInput
     }
