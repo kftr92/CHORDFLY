@@ -119,6 +119,7 @@ import androidx.lifecycle.viewModelScope
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView as PierYouTubePlayerView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1283,7 +1284,6 @@ fun PlayOnBrowserButton(videoId: String) {
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun YouTubePlayerView(
     videoId: String,
@@ -1292,113 +1292,50 @@ fun YouTubePlayerView(
     onStateChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val htmlContent = remember(videoId) {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
-                #player { width: 100%; height: 100%; }
-            </style>
-        </head>
-        <body>
-            <div id="player"></div>
-            <script src="https://www.youtube.com/iframe_api"></script>
-            <script>
-                var player;
-                function onYouTubeIframeAPIReady() {
-                    player = new YT.Player('player', {
-                        height: '100%',
-                        width: '100%',
-                        videoId: '$videoId',
-                        playerVars: {
-                            'playsinline': 1,
-                            'controls': 1,
-                            'rel': 0,
-                            'enablejsapi': 1,
-                            'origin': 'https://www.youtube.com'
-                        },
-                        events: {
-                            'onStateChange': onPlayerStateChange
-                        }
-                    });
-                }
+    NativeYouTubePlayer(
+        videoId = videoId,
+        onTimeUpdate = onTimeUpdate,
+        onStateChange = onStateChange,
+        modifier = modifier
+    )
+}
 
-                var timer;
-                function onPlayerStateChange(event) {
-                    if (event.data == YT.PlayerState.PLAYING) {
-                        if (window.AndroidBridge) AndroidBridge.onStateChange(true);
-                        if (!timer) {
-                            timer = setInterval(function() {
-                                if (player && player.getCurrentTime) {
-                                    if (window.AndroidBridge) AndroidBridge.onTimeUpdate(player.getCurrentTime());
-                                }
-                            }, 200);
-                        }
-                    } else {
-                        if (window.AndroidBridge) AndroidBridge.onStateChange(false);
-                        if (timer) {
-                            clearInterval(timer);
-                            timer = null;
-                        }
-                    }
-                }
-            </script>
-        </body>
-        </html>
-        """.trimIndent()
+@Composable
+fun NativeYouTubePlayer(
+    videoId: String,
+    onTimeUpdate: (Float) -> Unit = {},
+    onStateChange: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    var activePlayer by remember { mutableStateOf<YouTubePlayer?>(null) }
+
+    LaunchedEffect(videoId) {
+        activePlayer?.cueVideo(videoId, 0f)
     }
 
     AndroidView(
         factory = { context ->
-            WebView(context).apply {
-                webChromeClient = WebChromeClient()
+            PierYouTubePlayerView(context).apply {
+                val options = IFramePlayerOptions.Builder()
+                    .controls(1)
+                    .rel(0)
+                    .build()
 
-                // Mencegah interaksi tap pada video melempar navigasi ke Aplikasi YouTube Luar
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView?,
-                        request: WebResourceRequest?
-                    ): Boolean {
-                        return false // Tetap muat di dalam WebView
+                initialize(object : AbstractYouTubePlayerListener() {
+                    override fun onReady(youTubePlayer: YouTubePlayer) {
+                        activePlayer = youTubePlayer
+                        youTubePlayer.cueVideo(videoId, 0f)
                     }
 
-                    @Suppress("DEPRECATION")
-                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                        return false // Tetap muat di dalam WebView
-                    }
-                }
-
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    allowFileAccess = true
-                    allowContentAccess = true
-                    mediaPlaybackRequiresUserGesture = false
-                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                }
-
-                addJavascriptInterface(object {
-                    @JavascriptInterface
-                    fun onTimeUpdate(seconds: Float) {
-                        onTimeUpdate(seconds)
+                    override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
+                        onTimeUpdate(second)
                     }
 
-                    @JavascriptInterface
-                    fun onStateChange(playing: Boolean) {
+                    override fun onStateChange(youTubePlayer: YouTubePlayer, state: PlayerConstants.PlayerState) {
+                        val playing = state == PlayerConstants.PlayerState.PLAYING
                         onStateChange(playing)
                     }
-                }, "AndroidBridge")
-
-                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
-            }
-        },
-        update = { webView ->
-            if (webView.url == null || !webView.url!!.contains(videoId)) {
-                webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+                }, true, options)
             }
         },
         modifier = modifier
