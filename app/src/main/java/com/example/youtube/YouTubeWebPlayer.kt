@@ -24,6 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 
+private const val TAG = "CHORDFLY_YOUTUBE"
+private const val REFERER_BASE_URL = "https://com.aistudio.chordify.app"
+private const val PLAYER_ORIGIN = "https://com.aistudio.chordify.app"
+
 fun Context.findActivity(): Activity? {
     var context = this
     while (context is ContextWrapper) {
@@ -142,7 +146,7 @@ fun YouTubeWebPlayer(
                             'playsinline': 1,
                             'rel': 0,
                             'enablejsapi': 1,
-                            'origin': 'https://www.youtube.com'
+                            'origin': '$PLAYER_ORIGIN'
                         },
                         events: {
                             'onReady': onPlayerReady,
@@ -216,7 +220,6 @@ fun YouTubeWebPlayer(
                 function onPlayerError(event) {
                     if (window.AndroidBridge) {
                         window.AndroidBridge.onPlayerError(event.data);
-                        window.AndroidBridge.logMessage("PLAYER_ERROR=" + event.data);
                     }
                 }
 
@@ -286,28 +289,34 @@ fun YouTubeWebPlayer(
 
                     @JavascriptInterface
                     fun onPlayerError(errorCode: Int) {
-                        Log.e("CHORDFLY_YOUTUBE", "PLAYER_ERROR=$errorCode")
+                        Log.e(TAG, "PLAYER_ERROR=$errorCode")
                     }
 
                     @JavascriptInterface
                     fun onAutoplayBlocked() {
-                        Log.w("CHORDFLY_YOUTUBE", "PLAYER_AUTOPLAY_BLOCKED")
+                        Log.w(TAG, "PLAYER_AUTOPLAY_BLOCKED")
                     }
 
                     @JavascriptInterface
                     fun logMessage(msg: String) {
-                        Log.d("CHORDFLY_YOUTUBE", msg)
+                        Log.d(TAG, msg)
                     }
                 }, "AndroidBridge")
 
                 tag = videoId
-                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+                Log.d(TAG, "VIDEO_ID=$videoId")
+                Log.d(TAG, "REFERER_BASE_URL=$REFERER_BASE_URL")
+                Log.d(TAG, "PLAYER_ORIGIN=$PLAYER_ORIGIN")
+                loadDataWithBaseURL(REFERER_BASE_URL, htmlContent, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
             if (webView.tag != videoId) {
                 webView.tag = videoId
-                webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+                Log.d(TAG, "VIDEO_ID=$videoId")
+                Log.d(TAG, "REFERER_BASE_URL=$REFERER_BASE_URL")
+                Log.d(TAG, "PLAYER_ORIGIN=$PLAYER_ORIGIN")
+                webView.loadDataWithBaseURL(REFERER_BASE_URL, htmlContent, "text/html", "UTF-8", null)
             }
         },
         onRelease = { webView ->
