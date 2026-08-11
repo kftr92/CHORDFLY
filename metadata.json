@@ -1,5 +1,5 @@
 {
-  "name": "Chordify AI",
+  "name": "CHORDFLY",
   "description": "Real-time AI audio analysis and chord transposition tool for guitar and music performance.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

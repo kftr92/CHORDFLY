@@ -1,272 +1,329 @@
 package com.example
 
-import android.annotation.SuppressLint
+import android.Manifest
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.animation.animateColorAsState
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.launch
-import java.net.URLEncoder
-
-data class ChordTimestamp(val id: Int, val chord: String, val timeSec: Float)
-
-object ChordTransposer {
-    private val NOTES = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
-
-    fun transpose(chord: String, semitones: Int): String {
-        if (semitones == 0) return chord
-        val baseNote = when {
-            chord.length >= 2 && (chord[1] == '#' || chord[1] == 'b') -> chord.substring(0, 2)
-            else -> chord.substring(0, 1)
-        }
-        val normalizedNote = when (baseNote) {
-            "Db" -> "C#"; "Eb" -> "D#"; "Gb" -> "F#"; "Ab" -> "G#"; "Bb" -> "A#"; else -> baseNote
-        }
-        val index = NOTES.indexOf(normalizedNote)
-        if (index == -1) return chord
-        var newIndex = (index + semitones) % NOTES.size
-        if (newIndex < 0) newIndex += NOTES.size
-        val suffix = chord.removePrefix(baseNote)
-        return NOTES[newIndex] + suffix
-    }
-}
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.ChordTimelineGrid
+import com.example.ui.CurrentChordCard
+import com.example.ui.HeaderBar
+import com.example.ui.NextChordsRow
+import com.example.ui.TransportControls
+import com.example.youtube.YouTubeSearchWebView
+import com.example.youtube.YouTubeWebPlayer
 
 class MainActivity : ComponentActivity() {
+
+    private val viewModel: MainViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
-                    ChordifyAppScreen()
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ChordifyAppScreen() {
-    var searchInput by remember { mutableStateOf("") }
-    var activeTargetUrl by remember { mutableStateOf("https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=1&controls=1&modestbranding=1&rel=0") }
-    var currentTimeSec by remember { mutableFloatStateOf(0f) }
-    var transposeOffset by remember { mutableIntStateOf(0) }
-
-    val chordsList = remember {
-        listOf(
-            ChordTimestamp(0, "C", 0.0f), ChordTimestamp(1, "G", 3.0f),
-            ChordTimestamp(2, "Am", 6.0f), ChordTimestamp(3, "F", 9.0f),
-            ChordTimestamp(4, "C", 12.0f), ChordTimestamp(5, "G", 15.0f),
-            ChordTimestamp(6, "Am", 18.0f), ChordTimestamp(7, "F", 21.0f),
-            ChordTimestamp(8, "C", 24.0f), ChordTimestamp(9, "Em", 27.0f),
-            ChordTimestamp(10, "F", 30.0f), ChordTimestamp(11, "G", 33.0f)
-        )
-    }
-
-    val activeIndex = remember(currentTimeSec) {
-        var idx = 0
-        for (i in chordsList.indices.reversed()) {
-            if (currentTimeSec >= chordsList[i].timeSec) {
-                idx = i
-                break
-            }
-        }
-        idx
-    }
-
-    val gridState = rememberLazyGridState()
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(activeIndex) {
-        coroutineScope.launch {
-            if (activeIndex in chordsList.indices) {
-                gridState.animateScrollToItem(activeIndex)
-            }
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Bar Pencarian Tunggal
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = searchInput,
-                onValueChange = { searchInput = it },
-                placeholder = { Text("Ketik Judul Lagu / Paste Link...", color = Color.Gray) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF00FF88),
-                    unfocusedBorderColor = Color.DarkGray,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    val query = searchInput.trim()
-                    if (query.isNotEmpty()) {
-                        val videoId = extractYouTubeId(query)
-                        activeTargetUrl = if (videoId != query && videoId.length == 11) {
-                            // Link atau ID YouTube
-                            "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&controls=1&modestbranding=1&rel=0"
-                        } else {
-                            // Pencarian Teks / Judul Lagu secara langsung di WebView
-                            val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                            "https://m.youtube.com/results?search_query=$encodedQuery"
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88))
-            ) {
-                Icon(Icons.Default.Search, contentDescription = "Cari", tint = Color.Black)
-            }
-        }
-
-        // YouTube Player / Search Engine Box
-        ResponsiveYouTubePlayer(
-            targetUrl = activeTargetUrl,
-            modifier = Modifier.fillMaxWidth().height(220.dp)
-        )
-
-        // Control Bar (Transpose & Time Display)
-        Row(
-            modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = String.format("%.1f s", currentTimeSec),
-                color = Color(0xFF00FF88),
-                fontSize = 16.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "Key: ${if (transposeOffset > 0) "+$transposeOffset" else transposeOffset}", color = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(onClick = { if (transposeOffset > -12) transposeOffset-- }) {
-                    Icon(Icons.Default.Remove, contentDescription = "Down", tint = Color.White)
-                }
-                IconButton(onClick = { transposeOffset = 0 }) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reset", tint = Color.Gray)
-                }
-                IconButton(onClick = { if (transposeOffset < 12) transposeOffset++ }) {
-                    Icon(Icons.Default.Add, contentDescription = "Up", tint = Color.White)
-                }
-            }
-        }
-
-        // Chord Grid Sync
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            state = gridState,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)
-        ) {
-            itemsIndexed(chordsList) { index, item ->
-                val isActive = index == activeIndex
-                val transposed = ChordTransposer.transpose(item.chord, transposeOffset)
-                val bgColor by animateColorAsState(if (isActive) Color(0xFF00FF88) else Color(0xFF252525), label = "bg")
-                val textColor by animateColorAsState(if (isActive) Color.Black else Color.White, label = "text")
-
-                Box(
-                    modifier = Modifier
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(bgColor)
-                        .border(1.dp, if (isActive) Color.White else Color(0xFF333333), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFF0B0D10)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = transposed, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = textColor)
-                        Text(text = String.format("%.1fs", item.timeSec), fontSize = 10.sp, color = textColor.copy(alpha = 0.7f))
-                    }
+                    ChordFlyScreen(viewModel = viewModel)
                 }
             }
         }
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun ResponsiveYouTubePlayer(
-    targetUrl: String,
-    modifier: Modifier = Modifier
-) {
-    AndroidView(
-        factory = { context ->
-            WebView(context).apply {
-                webChromeClient = WebChromeClient()
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                        val url = request?.url?.toString() ?: ""
-                        // Jika pengguna mengeklik video dari hasil pencarian, konversi otomatis ke Player Embed
-                        if (url.contains("watch?v=")) {
-                            val videoId = url.substringAfter("v=").substringBefore("&")
-                            view?.loadUrl("https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&controls=1&modestbranding=1&rel=0")
-                            return true
-                        }
-                        return false
+fun ChordFlyScreen(viewModel: MainViewModel) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val youtubeState by viewModel.youtubeState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.toggleMicListening()
+        }
+    }
+
+    // Collect UI events (Toasts)
+    LaunchedEffect(Unit) {
+        viewModel.uiEvent.collect { event ->
+            when (event) {
+                is YouTubeUiEvent.ShowToast -> {
+                    Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    if (youtubeState.showYouTubeSearch) {
+        YouTubeSearchWebView(
+            query = youtubeState.searchQuery,
+            onVideoSelected = { videoId ->
+                viewModel.selectYouTubeVideo(videoId)
+            },
+            onClose = {
+                viewModel.closeYouTubeSearch()
+            }
+        )
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
+        // Top Header
+        HeaderBar(
+            title = uiState.title,
+            artist = uiState.artist,
+            key = uiState.key,
+            bpm = uiState.bpm,
+            isAiAnalyzing = uiState.isAiAnalyzing,
+            onAiAnalyzeClick = { viewModel.runGeminiChordAnalysis() }
+        )
+
+        // CHORDFLY V2 SEARCH & PLAYBACK CONTROL PANEL
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF141A24)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                // Section 1: Search Song Name
+                Text(
+                    text = "Cari lagu",
+                    color = Color.LightGray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                OutlinedTextField(
+                    value = youtubeState.searchQuery,
+                    onValueChange = { viewModel.onSearchQueryChange(it) },
+                    placeholder = { Text("misal: Peterpan Bintang di Surga", color = Color.Gray, fontSize = 13.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { viewModel.openYouTubeSearch() }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF00FF88),
+                        unfocusedBorderColor = Color(0xFF232832),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Button(
+                    onClick = { viewModel.openYouTubeSearch() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Cari di YouTube",
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("🔎 CARI DI YOUTUBE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 10.dp),
+                    color = Color(0xFF222B38)
+                )
+
+                // Section 2: Paste YouTube URL
+                Text(
+                    text = "Atau tempel URL video:",
+                    color = Color.LightGray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                OutlinedTextField(
+                    value = youtubeState.youtubeUrl,
+                    onValueChange = { viewModel.onYoutubeUrlChange(it) },
+                    placeholder = { Text("https://youtube.com/watch?v=...", color = Color.Gray, fontSize = 13.sp) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF00FF88),
+                        unfocusedBorderColor = Color(0xFF232832),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Paste Button
+                    OutlinedButton(
+                        onClick = {
+                            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clipData = clipboardManager.primaryClip
+                            val clipText = if (clipData != null && clipData.itemCount > 0) {
+                                clipData.getItemAt(0).text?.toString()
+                            } else {
+                                null
+                            }
+                            viewModel.pasteFromClipboard(clipText)
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00FF88)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = "Tempel Clipboard",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("📋 TEMPEL", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Open Video Button
+                    Button(
+                        onClick = { viewModel.openVideoFromUrl() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Buka Video",
+                            tint = Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("▶ BUKA VIDEO", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                }
-                loadUrl(targetUrl)
-            }
-        },
-        update = { webView ->
-            if (webView.url != targetUrl) {
-                webView.loadUrl(targetUrl)
-            }
-        },
-        modifier = modifier
-    )
-}
 
-fun extractYouTubeId(input: String): String {
-    val clean = input.trim()
-    return when {
-        clean.contains("v=") -> clean.substringAfter("v=").substringBefore("&")
-        clean.contains("youtu.be/") -> clean.substringAfter("youtu.be/").substringBefore("?")
-        clean.contains("embed/") -> clean.substringAfter("embed/").substringBefore("?")
-        clean.length == 11 && !clean.contains(" ") -> clean
-        else -> clean
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Status Bar
+                Surface(
+                    color = Color(0xFF0D121A),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Status: ${youtubeState.status}",
+                        color = if (youtubeState.status.contains("salah", true) || youtubeState.status.contains("tidak", true) || youtubeState.status.contains("Gagal", true)) Color(0xFFFF6B6B) else Color(0xFF00FF88),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
+        // YouTube Player Container
+        YouTubeWebPlayer(
+            targetUrl = uiState.activeTargetUrl,
+            onTimeUpdate = { sec -> viewModel.updatePlaybackTime(sec) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+        )
+
+        // Current Active Chord Hero Card
+        CurrentChordCard(
+            currentChord = uiState.currentChord,
+            transposeOffset = uiState.transposeOffset,
+            currentTimeSec = uiState.currentTimeSec,
+            notes = uiState.currentChordNotes,
+            livePitch = uiState.livePitch,
+            isMicListening = uiState.isMicListening,
+            onMicToggleClick = {
+                val hasPermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (hasPermission) {
+                    viewModel.toggleMicListening()
+                } else {
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        )
+
+        // Upcoming Chords Preview Row
+        NextChordsRow(
+            nextChords = uiState.nextChords,
+            transposeOffset = uiState.transposeOffset
+        )
+
+        // Key Transpose & Status Control Bar
+        TransportControls(
+            transposeOffset = uiState.transposeOffset,
+            onIncrement = { viewModel.incrementTranspose() },
+            onDecrement = { viewModel.decrementTranspose() },
+            onReset = { viewModel.resetTranspose() },
+            aiStatusMessage = uiState.aiStatusMessage
+        )
+
+        // Full Sync Chord Timeline Grid
+        ChordTimelineGrid(
+            chords = uiState.chords,
+            activeChord = uiState.currentChord,
+            transposeOffset = uiState.transposeOffset,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp)
+        )
     }
+}
 }
