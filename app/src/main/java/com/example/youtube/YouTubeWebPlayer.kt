@@ -21,12 +21,11 @@ fun YouTubeWebPlayer(
     onDurationReady: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val cleanVideoId = remember(videoId, targetUrl) {
-        val raw = if (videoId.isNotBlank()) videoId else targetUrl
-        extractYouTubeId(raw)
-    }
+    val rawInput = if (videoId.isNotBlank()) videoId else targetUrl
+    val extractedId = extractYouTubeId(rawInput)
+    val targetVideoId = extractedId.ifBlank { "jfKfPfyJRdk" }
 
-    val htmlContent = remember(cleanVideoId) {
+    val htmlContent = remember(targetVideoId) {
         """
         <!DOCTYPE html>
         <html>
@@ -34,7 +33,7 @@ fun YouTubeWebPlayer(
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+                html, body { width: 100%; height: 100%; background: #000000; overflow: hidden; }
                 #player { width: 100%; height: 100%; }
             </style>
         </head>
@@ -48,7 +47,7 @@ fun YouTubeWebPlayer(
                     player = new YT.Player('player', {
                         height: '100%',
                         width: '100%',
-                        videoId: '$cleanVideoId',
+                        videoId: '$targetVideoId',
                         playerVars: {
                             'playsinline': 1,
                             'controls': 1,
@@ -89,9 +88,7 @@ fun YouTubeWebPlayer(
     AndroidView(
         factory = { context ->
             WebView(context).apply {
-                // Memaksa Hardware Acceleration agar video dirender oleh GPU (Anti Layar Hitam)
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
