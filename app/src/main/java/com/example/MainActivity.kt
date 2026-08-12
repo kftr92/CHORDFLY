@@ -212,12 +212,14 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
             transposeOffset = uiState.transposeOffset
         )
 
-        // Key Transpose & Status Control Bar
+        // Key Transpose & Tempo BPM Control Bar
         TransportControls(
             transposeOffset = uiState.transposeOffset,
             onIncrement = { viewModel.incrementTranspose() },
             onDecrement = { viewModel.decrementTranspose() },
             onReset = { viewModel.resetTranspose() },
+            bpm = uiState.bpm ?: 120,
+            onBpmChange = { delta -> viewModel.changeBpm(delta) },
             aiStatusMessage = uiState.aiStatusMessage
         )
 

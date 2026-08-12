@@ -12,6 +12,7 @@ import com.example.model.SongSearchResult
 import com.example.model.YouTubeUiState
 import com.example.music.ChordParser
 import com.example.music.ChordTransposer
+import com.example.music.TempoAlignmentService
 import com.example.youtube.YouTubeSearchService
 import com.example.youtube.YouTubeUrlParser
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -36,16 +37,17 @@ class MainViewModel : ViewModel() {
 
     private val defaultChords = run {
         val pattern = listOf("C", "G", "Am", "F", "C", "Em", "F", "G", "Am", "Em", "F", "C", "Dm", "G", "C", "C")
-        List(64) { index ->
+        val rawList = List(64) { index ->
             val chordName = pattern[index % pattern.size]
             ChordTimestamp(
                 id = index,
-                timeSec = index * 2.0f,
+                timeSec = 0f,
                 chord = chordName,
                 confidence = 0.95f,
                 source = "Standard Preset"
             )
         }
+        TempoAlignmentService.alignProgressionToBpm(rawList, targetBpm = 120)
     }
 
     private val _uiState = MutableStateFlow(
@@ -287,6 +289,21 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun changeBpm(delta: Int) {
+        val currentBpm = _uiState.value.bpm ?: 120
+        val newBpm = (currentBpm + delta).coerceIn(40, 240)
+        if (newBpm == currentBpm) return
+
+        _uiState.update { state ->
+            val reAlignedChords = TempoAlignmentService.alignProgressionToBpm(state.chords, newBpm)
+            state.copy(
+                bpm = newBpm,
+                chords = reAlignedChords
+            )
+        }
+        recalculateActiveState()
+    }
+
     fun runGeminiChordAnalysis(query: String = _youtubeState.value.searchQuery) {
         val currentQuery = query.ifBlank { _uiState.value.title }
         viewModelScope.launch {
@@ -300,13 +317,15 @@ class MainViewModel : ViewModel() {
             val result = geminiAnalyzer.analyzeSongChords(currentQuery, _uiState.value.chords)
 
             if (result.chords.isNotEmpty()) {
+                val detectedBpm = result.bpm ?: _uiState.value.bpm ?: 120
+                val alignedChords = TempoAlignmentService.alignProgressionToBpm(result.chords, detectedBpm)
                 _uiState.update { state ->
                     state.copy(
                         title = result.songTitle.ifBlank { state.title },
                         artist = result.artist.ifBlank { state.artist },
                         key = result.key ?: state.key,
-                        bpm = result.bpm ?: state.bpm,
-                        chords = result.chords,
+                        bpm = detectedBpm,
+                        chords = alignedChords,
                         isAiAnalyzing = false,
                         aiStatusMessage = result.summary
                     )
@@ -329,7 +348,7 @@ class MainViewModel : ViewModel() {
             val chords = state.chords
             val offset = state.transposeOffset
 
-            val active = chords.lastOrNull { it.timeSec <= time } ?: chords.firstOrNull()
+            val active = TempoAlignmentService.findActiveChord(time, chords)
             val activeIndex = if (active != null) chords.indexOf(active) else -1
 
             val nextList = if (activeIndex != -1 && activeIndex + 1 < chords.size) {

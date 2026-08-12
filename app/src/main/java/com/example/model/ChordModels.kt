@@ -6,7 +6,9 @@ data class ChordTimestamp(
     val chord: String,
     val confidence: Float = 1.0f,
     val source: String = "Preset"
-)
+) {
+    constructor(id: Int, chord: String, timeSec: Float) : this(id, timeSec, chord)
+}
 
 data class ParsedChord(
     val rawChord: String,
