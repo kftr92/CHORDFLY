@@ -193,6 +193,7 @@ fun ChordFlyScreen(viewModel: MainViewModel) {
         YouTubeWebPlayer(
             targetUrl = uiState.activeTargetUrl,
             onTimeUpdate = { sec -> viewModel.updatePlaybackTime(sec) },
+            onDurationReady = { duration -> viewModel.onDurationReady(duration) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(200.dp)

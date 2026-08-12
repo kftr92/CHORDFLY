@@ -262,6 +262,16 @@ class MainViewModel : ViewModel() {
         recalculateActiveState()
     }
 
+    fun onDurationReady(durationSec: Float) {
+        if (durationSec <= 0f) return
+        _uiState.update { state ->
+            val bpm = state.bpm ?: 120
+            val alignedChords = TempoAlignmentService.alignChordsToTempo(state.chords, durationSec, bpm)
+            state.copy(chords = alignedChords)
+        }
+        recalculateActiveState()
+    }
+
     fun incrementTranspose() {
         if (_uiState.value.transposeOffset < 12) {
             _uiState.update { it.copy(transposeOffset = it.transposeOffset + 1) }
